@@ -1,6 +1,11 @@
 # MyClaw Toolkit — MCP Server
 
-**23-in-1 developer utility toolkit as an MCP server.** Search the web, convert currencies, check crypto prices, generate QR codes, format JSON, and more — all from any MCP-compatible AI assistant.
+[![Glama](https://glama.ai/mcp/servers/Dusheh/myclaw-toolkit/badge)](https://glama.ai/mcp/servers/Dusheh/myclaw-toolkit)
+[![npm](https://img.shields.io/npm/v/myclaw-toolkit)](https://www.npmjs.com/package/myclaw-toolkit)
+[![npm downloads](https://img.shields.io/npm/dw/myclaw-toolkit)](https://www.npmjs.com/package/myclaw-toolkit)
+[![license](https://img.shields.io/npm/l/myclaw-toolkit)](./LICENSE)
+
+**24-in-1 developer utility toolkit as an MCP server.** Search the web, convert currencies, check crypto prices, generate QR codes, format JSON, and more — all from any MCP-compatible AI assistant.
 
 ## Quick Install
 
@@ -68,6 +73,20 @@ claude mcp add myclaw-toolkit -- npx myclaw-toolkit
 | `markdown_to_html` | Markdown → HTML |
 | `wifi_qrcode` | WiFi QR code generator |
 | `ai_translate` | AI translation |
+
+### Health
+| Tool | Description |
+|------|-------------|
+| `health_check` | Check API backend status & latency |
+
+## Discoverability
+
+Listed on these MCP registries (help others find the toolkit):
+
+- [Glama](https://glama.ai/mcp/servers/Dusheh/myclaw-toolkit) — badge above
+- [mcp.so](https://mcp.so) — submitted via form
+- [Smithery](https://smithery.ai) — submitted via form
+- [awesome-mcp-servers](https://github.com/punkpeye/awesome-mcp-servers) — PR pending
 
 ## Environment Variables
 

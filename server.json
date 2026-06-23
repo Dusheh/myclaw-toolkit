@@ -1,17 +1,17 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Dusheh/myclaw-toolkit",
-  "description": "23-in-1 developer utility toolkit — search, exchange rates, crypto, QR codes, and more",
+  "description": "23-in-1 developer utility toolkit \u2014 search, exchange rates, crypto, QR codes, and more",
   "repository": {
     "url": "https://github.com/Dusheh/myclaw-toolkit",
     "source": "github"
   },
-  "version": "1.0.3",
+  "version": "1.0.7",
   "packages": [
     {
       "identifier": "myclaw-toolkit",
       "registryType": "npm",
-      "version": "1.0.3",
+      "version": "1.0.7",
       "transport": {
         "type": "stdio"
       }

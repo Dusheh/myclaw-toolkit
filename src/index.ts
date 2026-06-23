@@ -16,18 +16,34 @@ import { z } from "zod";
 // ── Config ──────────────────────────────────────────────────────────
 const API_BASE = process.env.MYCLAW_API || "http://47.103.7.241";
 const USER_AGENT = "myclaw-toolkit-mcp/1.0";
+const FETCH_TIMEOUT_MS = 15_000;
 
 async function apiCall(path: string): Promise<string> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-  });
-  return res.text();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      return JSON.stringify({ error: `API returned ${res.status}`, path });
+    }
+    return res.text();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      return JSON.stringify({ error: "Request timed out", path });
+    }
+    return JSON.stringify({ error: `Connection failed: ${err.message}`, path });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── Server ──────────────────────────────────────────────────────────
 const server = new McpServer({
   name: "myclaw-toolkit",
-  version: "1.0.0",
+  version: "1.0.3",
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -359,6 +375,31 @@ server.tool(
   async ({ a, b }) => {
     const result = await apiCall(`/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
     return { content: [{ type: "text", text: result }] };
+  },
+);
+
+// ═══════════════════════════════════════════════════════════════════
+// CATEGORY 5: HEALTH
+// ═══════════════════════════════════════════════════════════════════
+
+server.tool(
+  "health_check",
+  "Check if the MyClaw API backend is reachable and responsive",
+  {},
+  async () => {
+    const start = Date.now();
+    const result = await apiCall("/ts");
+    const elapsed = Date.now() - start;
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          backend: API_BASE,
+          status: result.startsWith("{") ? "healthy" : "degraded",
+          latency_ms: elapsed,
+        }),
+      }],
+    };
   },
 );
 
