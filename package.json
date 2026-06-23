@@ -1,6 +1,6 @@
 {
   "name": "myclaw-toolkit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "23-in-1 developer utility toolkit as an MCP server — search, exchange rates, crypto, QR codes, translation, and more",
   "type": "module",
   "main": "dist/index.js",
