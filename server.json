@@ -10,7 +10,10 @@
   "packages": [
     {
       "identifier": "myclaw-toolkit",
-      "registryType": "npm"
+      "registryType": "npm",
+      "transport": {
+        "type": "stdio"
+      }
     }
   ]
 }
