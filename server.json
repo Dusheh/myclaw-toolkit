@@ -9,9 +9,8 @@
   "version": "1.0.2",
   "packages": [
     {
-      "type": "npm",
-      "name": "myclaw-toolkit",
-      "url": "https://www.npmjs.com/package/myclaw-toolkit"
+      "identifier": "myclaw-toolkit",
+      "registryType": "npm"
     }
   ]
 }
