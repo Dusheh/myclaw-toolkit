@@ -78,7 +78,7 @@ claude mcp add myclaw-toolkit -- npx myclaw-toolkit
 ## Development
 
 ```bash
-git clone https://github.com/myclaw/toolkit
+git clone https://github.com/Dusheh/myclaw-toolkit
 cd toolkit
 npm install
 npm run dev
