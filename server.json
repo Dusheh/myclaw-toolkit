@@ -11,6 +11,7 @@
     {
       "identifier": "myclaw-toolkit",
       "registryType": "npm",
+      "version": "1.0.2",
       "transport": {
         "type": "stdio"
       }
