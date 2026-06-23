@@ -14,25 +14,43 @@ jobs:
     name: Publish to MCP Registry
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: Install mcp-publisher
         run: |
-          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
+          chmod +x mcp-publisher
+          echo "Downloaded mcp-publisher $(./mcp-publisher version 2>/dev/null || echo 'ok')"
 
       - name: Authenticate to MCP Registry
         run: ./mcp-publisher login github-oidc
 
-      - name: Update version in server.json
+      - name: Verify server.json
         run: |
-          jq --arg v "${{ steps.version.outputs.VERSION }}" '.version = $v' server.json > server.tmp && mv server.tmp server.json
+          echo "::group::server.json contents"
+          cat server.json
+          echo "::endgroup::"
+          echo "name=$(jq -r .name server.json)"
+          echo "version=$(jq -r .version server.json)"
 
       - name: Publish to MCP Registry
-        run: ./mcp-publisher publish
+        id: publish
+        run: |
+          if ./mcp-publisher publish; then
+            echo "✅ Published successfully to MCP Registry"
+          else
+            echo "::error::MCP Registry publish failed (exit code: $?)"
+            echo "Check https://registry.modelcontextprotocol.io/ for current status"
+            exit 1
+          fi
+
+      - name: Verify publication
+        if: success()
+        run: |
+          sleep 10
+          SERVER_NAME=$(jq -r .name server.json)
+          echo "Checking registry for: $SERVER_NAME"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.modelcontextprotocol.io/v0/servers/$SERVER_NAME" || echo "failed")
+          echo "Registry status: HTTP $STATUS"
