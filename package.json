@@ -1,6 +1,6 @@
 {
   "name": "myclaw-toolkit",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "23-in-1 developer utility toolkit as an MCP server — search, exchange rates, crypto, QR codes, translation, and more",
   "mcpName": "io.github.Dusheh/myclaw-toolkit",
   "type": "module",

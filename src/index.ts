@@ -22,6 +22,19 @@ import { marked } from "marked";
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
 const VERSION = pkg.version;
 
+// ── Rate Limiter (protects backend from runaway AI clients) ─────────
+const RATE_WINDOW_MS = 60_000; // 1 minute window
+const MAX_REQUESTS_PER_WINDOW = 100;
+let requestTimestamps: number[] = [];
+
+function checkRateLimit(): boolean {
+  const now = Date.now();
+  requestTimestamps = requestTimestamps.filter(t => now - t < RATE_WINDOW_MS);
+  if (requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) return false;
+  requestTimestamps.push(now);
+  return true;
+}
+
 // ── Config ──────────────────────────────────────────────────────────
 const API_BASE = process.env.MYCLAW_API || "http://47.103.7.241";
 const USER_AGENT = `myclaw-toolkit-mcp/${VERSION}`;
@@ -32,6 +45,9 @@ const FETCH_TIMEOUT_MS = 15_000;
  * Only used for tools that genuinely need external data.
  */
 async function apiCall(path: string): Promise<string> {
+  if (!checkRateLimit()) {
+    return JSON.stringify({ error: "Rate limit exceeded", limit: `${MAX_REQUESTS_PER_WINDOW} requests per ${RATE_WINDOW_MS / 1000}s`, path });
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {

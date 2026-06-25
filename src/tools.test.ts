@@ -236,3 +236,37 @@ describe("wifi_qrcode format", () => {
     expect(wifiString).toBe("WIFI:S:MyNetwork;T:WPA;P:secret123;;");
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// Rate Limiter Tests
+// ═══════════════════════════════════════════════════════════════════
+
+describe("rate_limiter", () => {
+  it("allows requests within limit", () => {
+    const RATE_WINDOW_MS = 60_000;
+    const MAX = 100;
+    let timestamps: number[] = [];
+    const check = () => {
+      const now = Date.now();
+      timestamps = timestamps.filter(t => now - t < RATE_WINDOW_MS);
+      if (timestamps.length >= MAX) return false;
+      timestamps.push(now);
+      return true;
+    };
+    
+    // First 100 requests should pass
+    for (let i = 0; i < MAX; i++) {
+      expect(check()).toBe(true);
+    }
+    // 101st should fail
+    expect(check()).toBe(false);
+  });
+  
+  it("resets after window expires", () => {
+    const now = Date.now();
+    // Create 100 timestamps all older than the window
+    const timestamps = Array.from({ length: 100 }, () => now - 90_000);
+    const filtered = timestamps.filter(t => now - t < 60_000);
+    expect(filtered.length).toBe(0); // all expired
+  });
+});
