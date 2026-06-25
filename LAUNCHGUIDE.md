@@ -81,7 +81,7 @@ use_cases:
   - Check domain availability
   - Generate vCard contacts and WiFi QR codes
 
-repository: https://github.com/myclaw/toolkit
+repository: https://github.com/Dusheh/myclaw-toolkit
 homepage: https://myclaw.dev
 author: MyClaw
 author_url: https://myclaw.dev

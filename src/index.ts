@@ -5,19 +5,32 @@
  * Exposes 23 tools to AI assistants (Claude, ChatGPT, Cursor, etc.)
  * via the Model Context Protocol (MCP).
  *
- * Free tier: utility & data tools
- * Pro tier: search & AI tools (subscription-based via MCP Marketplace)
+ * Privacy-first design: all local-computable operations run entirely
+ * on-device. Only tools that genuinely need external data (search,
+ * exchange rates, crypto prices, etc.) call the remote API.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import QRCode from "qrcode";
+import { marked } from "marked";
+
+// ── Version (read from package.json, never hardcoded) ─────────────
+const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf-8"));
+const VERSION = pkg.version;
 
 // ── Config ──────────────────────────────────────────────────────────
 const API_BASE = process.env.MYCLAW_API || "http://47.103.7.241";
-const USER_AGENT = "myclaw-toolkit-mcp/1.0";
+const USER_AGENT = `myclaw-toolkit-mcp/${VERSION}`;
 const FETCH_TIMEOUT_MS = 15_000;
 
+/**
+ * Safe API call with timeout, proper error reading, and abort support.
+ * Only used for tools that genuinely need external data.
+ */
 async function apiCall(path: string): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -26,10 +39,17 @@ async function apiCall(path: string): Promise<string> {
       headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
       signal: controller.signal,
     });
+    const body = await res.text();
     if (!res.ok) {
-      return JSON.stringify({ error: `API returned ${res.status}`, path });
+      // Parse error body if JSON, otherwise return raw text
+      try {
+        const errJson = JSON.parse(body);
+        return JSON.stringify({ error: `API ${res.status}`, detail: errJson, path });
+      } catch {
+        return JSON.stringify({ error: `API ${res.status}`, detail: body.slice(0, 500), path });
+      }
     }
-    return res.text();
+    return body;
   } catch (err: any) {
     if (err.name === "AbortError") {
       return JSON.stringify({ error: "Request timed out", path });
@@ -40,129 +60,263 @@ async function apiCall(path: string): Promise<string> {
   }
 }
 
+// ── Local utility functions ───────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [
+    parseInt(h.slice(0, 2), 16),
+    parseInt(h.slice(2, 4), 16),
+    parseInt(h.slice(4, 6), 16),
+  ];
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
+    }
+  }
+  return [Math.round(h * 360), Math.round(s * 100), Math.round(l * 100)];
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  s /= 100; l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
 // ── Server ──────────────────────────────────────────────────────────
 const server = new McpServer({
   name: "myclaw-toolkit",
-  version: "1.0.3",
+  version: VERSION,
 });
 
 // ═══════════════════════════════════════════════════════════════════
-// CATEGORY 1: UTILITY TOOLS (Free)
+// CATEGORY 1: UTILITY TOOLS — All local, zero network
 // ═══════════════════════════════════════════════════════════════════
 
 server.tool(
   "timestamp",
-  "Get current Unix timestamp and ISO 8601 datetime",
+  "Get current Unix timestamp and ISO 8601 datetime (runs locally, no network)",
   {},
   async () => {
-    const result = await apiCall("/ts");
-    return { content: [{ type: "text", text: result }] };
+    const now = new Date();
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          unix_ms: now.getTime(),
+          unix_sec: Math.floor(now.getTime() / 1000),
+          iso8601: now.toISOString(),
+          utc: now.toUTCString(),
+          local: now.toString(),
+        }),
+      }],
+    };
   },
 );
 
 server.tool(
   "uuid",
-  "Generate UUID v4 identifiers",
+  "Generate UUID v4 identifiers (runs locally, no network)",
   {
     count: z.number().min(1).max(100).default(1).describe("Number of UUIDs to generate"),
   },
   async ({ count }) => {
-    const result = await apiCall(`/uuid?count=${count}`);
-    return { content: [{ type: "text", text: result }] };
+    const uuids = Array.from({ length: count }, () => crypto.randomUUID());
+    return { content: [{ type: "text", text: JSON.stringify({ uuids }) }] };
   },
 );
 
 server.tool(
   "base64",
-  "Encode or decode Base64 strings",
+  "Encode or decode Base64 strings (runs locally, no data leaves your machine)",
   {
     action: z.enum(["encode", "decode"]).describe("Operation to perform"),
     text: z.string().describe("Text to encode or Base64 to decode"),
   },
   async ({ action, text }) => {
-    const result = await apiCall(`/b64?action=${action}&text=${encodeURIComponent(text)}`);
-    return { content: [{ type: "text", text: result }] };
+    try {
+      if (action === "encode") {
+        const encoded = Buffer.from(text, "utf-8").toString("base64");
+        return { content: [{ type: "text", text: JSON.stringify({ action, input: text, output: encoded }) }] };
+      } else {
+        const decoded = Buffer.from(text, "base64").toString("utf-8");
+        return { content: [{ type: "text", text: JSON.stringify({ action, input: text, output: decoded }) }] };
+      }
+    } catch (err: any) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: err.message, action, input: text }) }] };
+    }
   },
 );
 
 server.tool(
   "hash",
-  "Generate cryptographic hashes (MD5, SHA1, SHA256, SHA512)",
+  "Generate cryptographic hashes — MD5, SHA1, SHA256, SHA512 (runs locally, no network)",
   {
     algorithm: z.enum(["md5", "sha1", "sha256", "sha512"]).default("sha256").describe("Hash algorithm"),
     text: z.string().describe("Text to hash"),
   },
   async ({ algorithm, text }) => {
-    const result = await apiCall(`/hash?algo=${algorithm}&text=${encodeURIComponent(text)}`);
-    return { content: [{ type: "text", text: result }] };
+    const hash = crypto.createHash(algorithm).update(text, "utf-8").digest("hex");
+    return { content: [{ type: "text", text: JSON.stringify({ algorithm, input: text, hash }) }] };
   },
 );
 
 server.tool(
   "qrcode",
-  "Generate QR codes from text or URLs",
+  "Generate QR codes from text or URLs (runs locally, no network)",
   {
     text: z.string().describe("Text or URL to encode in QR code"),
   },
   async ({ text }) => {
-    const result = await apiCall(`/qr?text=${encodeURIComponent(text)}`);
-    return { content: [{ type: "text", text: result }] };
+    const dataUrl = await QRCode.toDataURL(text, { width: 400, margin: 2 });
+    return { content: [{ type: "text", text: dataUrl }] };
   },
 );
 
 server.tool(
   "color_tools",
-  "Convert colors between hex, RGB, and HSL formats",
+  "Convert colors between hex, RGB, and HSL formats (runs locally, no network)",
   {
-    color: z.string().describe("Color value (hex like #ff0000, rgb like 255,0,0, or hsl like 0,100,50)"),
+    color: z.string().describe("Color value (hex like '#ff0000', rgb like '255,0,0', or hsl like '0,100,50')"),
   },
   async ({ color }) => {
-    const result = await apiCall(`/color?value=${encodeURIComponent(color)}`);
-    return { content: [{ type: "text", text: result }] };
+    try {
+      const c = color.trim();
+      // Detect format
+      if (c.startsWith("#") || /^[0-9a-fA-F]{6}$/.test(c)) {
+        const rgb = hexToRgb(c);
+        const hsl = rgbToHsl(...rgb);
+        return { content: [{ type: "text", text: JSON.stringify({ hex: `#${c.replace("#", "")}`, rgb, hsl }) }] };
+      }
+      if (c.toLowerCase().includes("hsl")) {
+        const match = c.match(/[\d.]+/g);
+        if (match && match.length >= 3) {
+          const [h, s, l] = [parseFloat(match[0]), parseFloat(match[1]), parseFloat(match[2])];
+          const rgb = hslToRgb(h, s, l);
+          const hex = "#" + rgb.map(v => v.toString(16).padStart(2, "0")).join("");
+          return { content: [{ type: "text", text: JSON.stringify({ hex, rgb, hsl: [h, s, l] }) }] };
+        }
+      }
+      if (c.includes(",")) {
+        const parts = c.split(",").map(Number);
+        if (parts.length >= 3 && !isNaN(parts[0])) {
+          const [r, g, b] = parts;
+          const hsl = rgbToHsl(r, g, b);
+          const hex = "#" + [r, g, b].map(v => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("");
+          return { content: [{ type: "text", text: JSON.stringify({ hex, rgb: [r, g, b], hsl }) }] };
+        }
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ error: "Unrecognized color format. Use hex (#ff0000), rgb (255,0,0), or hsl (0,100,50)" }) }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: err.message }) }] };
+    }
   },
 );
 
 server.tool(
   "json_formatter",
-  "Format, validate, or minify JSON strings",
+  "Format, validate, or minify JSON strings (runs locally, no data leaves your machine)",
   {
     action: z.enum(["format", "validate", "minify"]).default("format").describe("Operation"),
     json: z.string().describe("JSON string to process"),
   },
   async ({ action, json }) => {
-    const result = await apiCall(`/json?action=${action}&data=${encodeURIComponent(json)}`);
-    return { content: [{ type: "text", text: result }] };
+    try {
+      const parsed = JSON.parse(json);
+      if (action === "validate") {
+        return { content: [{ type: "text", text: JSON.stringify({ valid: true, depth: getDepth(parsed) }) }] };
+      }
+      const output = action === "minify" ? JSON.stringify(parsed) : JSON.stringify(parsed, null, 2);
+      return { content: [{ type: "text", text: output }] };
+    } catch (err: any) {
+      if (action === "validate") {
+        return { content: [{ type: "text", text: JSON.stringify({ valid: false, error: err.message }) }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ error: `Invalid JSON: ${err.message}` }) }] };
+    }
   },
 );
 
+function getDepth(obj: any, depth = 0): number {
+  if (typeof obj !== "object" || obj === null || obj === undefined) return depth;
+  let max = depth;
+  for (const key of Object.keys(obj)) {
+    const d = getDepth(obj[key], depth + 1);
+    if (d > max) max = d;
+  }
+  return max;
+}
+
 server.tool(
   "url_tools",
-  "Encode or decode URL strings",
+  "Encode or decode URL strings (runs locally, no network)",
   {
     action: z.enum(["encode", "decode"]).describe("Operation"),
     text: z.string().describe("Text to encode or URL to decode"),
   },
   async ({ action, text }) => {
-    const result = await apiCall(`/url?action=${action}&text=${encodeURIComponent(text)}`);
-    return { content: [{ type: "text", text: result }] };
+    try {
+      const output = action === "encode" ? encodeURIComponent(text) : decodeURIComponent(text);
+      return { content: [{ type: "text", text: JSON.stringify({ action, input: text, output }) }] };
+    } catch (err: any) {
+      return { content: [{ type: "text", text: JSON.stringify({ error: err.message, action, input: text }) }] };
+    }
   },
 );
 
 server.tool(
   "text_tools",
-  "Text processing utilities (count, reverse, case conversion)",
+  "Text processing utilities — count, reverse, case conversion (runs locally, no network)",
   {
     action: z.enum(["count", "reverse", "upper", "lower", "title"]).describe("Operation"),
     text: z.string().describe("Text to process"),
   },
   async ({ action, text }) => {
-    const result = await apiCall(`/text?action=${action}&text=${encodeURIComponent(text)}`);
-    return { content: [{ type: "text", text: result }] };
+    let output: any;
+    switch (action) {
+      case "count":
+        output = { chars: text.length, words: text.trim() ? text.trim().split(/\s+/).length : 0, lines: text.split("\n").length };
+        break;
+      case "reverse":
+        output = text.split("").reverse().join("");
+        break;
+      case "upper":
+        output = text.toUpperCase();
+        break;
+      case "lower":
+        output = text.toLowerCase();
+        break;
+      case "title":
+        output = text.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+        break;
+      default:
+        output = text;
+    }
+    return { content: [{ type: "text", text: JSON.stringify({ action, input: text, output }) }] };
   },
 );
 
 // ═══════════════════════════════════════════════════════════════════
-// CATEGORY 2: DATA TOOLS (Free)
+// CATEGORY 2: DATA TOOLS — Mixed local + remote
 // ═══════════════════════════════════════════════════════════════════
 
 server.tool(
@@ -205,20 +359,31 @@ server.tool(
 
 server.tool(
   "bmi_calculator",
-  "Calculate BMI (Body Mass Index) from height and weight",
+  "Calculate BMI (Body Mass Index) from height and weight (runs locally, no network)",
   {
     height: z.number().min(50).max(300).describe("Height in centimeters"),
     weight: z.number().min(1).max(500).describe("Weight in kilograms"),
   },
   async ({ height, weight }) => {
-    const result = await apiCall(`/bmi?h=${height}&w=${weight}`);
-    return { content: [{ type: "text", text: result }] };
+    const h = height / 100;
+    const bmi = weight / (h * h);
+    let category: string;
+    if (bmi < 18.5) category = "Underweight";
+    else if (bmi < 25) category = "Normal weight";
+    else if (bmi < 30) category = "Overweight";
+    else category = "Obese";
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({ height_cm: height, weight_kg: weight, bmi: Math.round(bmi * 100) / 100, category }),
+      }],
+    };
   },
 );
 
 server.tool(
   "vcard_generator",
-  "Generate vCard (.vcf) contact files",
+  "Generate vCard (.vcf) contact files (runs locally, no network)",
   {
     name: z.string().describe("Full name"),
     phone: z.string().optional().describe("Phone number"),
@@ -226,17 +391,18 @@ server.tool(
     org: z.string().optional().describe("Organization/company"),
   },
   async ({ name, phone, email, org }) => {
-    const params = new URLSearchParams({ name });
-    if (phone) params.set("phone", phone);
-    if (email) params.set("email", email);
-    if (org) params.set("org", org);
-    const result = await apiCall(`/vcard?${params.toString()}`);
-    return { content: [{ type: "text", text: result }] };
+    const lines = ["BEGIN:VCARD", "VERSION:3.0", `FN:${name}`];
+    if (org) lines.push(`ORG:${org}`);
+    if (phone) lines.push(`TEL:${phone}`);
+    if (email) lines.push(`EMAIL:${email}`);
+    lines.push("END:VCARD");
+    const vcard = lines.join("\n");
+    return { content: [{ type: "text", text: vcard }] };
   },
 );
 
 // ═══════════════════════════════════════════════════════════════════
-// CATEGORY 3: SEARCH & CONTENT TOOLS (Pro / requires API key)
+// CATEGORY 3: SEARCH & CONTENT TOOLS — Remote API
 // ═══════════════════════════════════════════════════════════════════
 
 server.tool(
@@ -304,24 +470,24 @@ server.tool(
 );
 
 // ═══════════════════════════════════════════════════════════════════
-// CATEGORY 4: PROCESSING TOOLS (Pro)
+// CATEGORY 4: PROCESSING TOOLS
 // ═══════════════════════════════════════════════════════════════════
 
 server.tool(
   "markdown_to_html",
-  "Convert Markdown text to HTML",
+  "Convert Markdown text to HTML (runs locally, no data leaves your machine)",
   {
     markdown: z.string().describe("Markdown text to convert"),
   },
   async ({ markdown }) => {
-    const result = await apiCall(`/md?text=${encodeURIComponent(markdown)}`);
-    return { content: [{ type: "text", text: result }] };
+    const html = await marked.parse(markdown, { async: true });
+    return { content: [{ type: "text", text: html }] };
   },
 );
 
 server.tool(
   "ai_translate",
-  "Translate text between languages using AI",
+  "Translate text between languages (uses MyMemory translation API)",
   {
     text: z.string().describe("Text to translate"),
     from: z.string().default("auto").describe("Source language (auto for auto-detect)"),
@@ -330,20 +496,27 @@ server.tool(
   async ({ text, from, to }) => {
     const langPair = from === "auto" ? `autodetect|${to}` : `${from}|${to}`;
     const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(langPair)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: controller.signal });
       const data = await res.json();
       const translated = data?.responseData?.translatedText || `Error: ${data?.responseStatus || "unknown"}`;
       return { content: [{ type: "text", text: JSON.stringify({ from, to, original: text, translated }) }] };
-    } catch {
-      return { content: [{ type: "text", text: JSON.stringify({ error: "Translation service unavailable", from, to, original: text }) }] };
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "Translation request timed out", from, to, original: text }) }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify({ error: `Translation service unavailable: ${err.message}`, from, to, original: text }) }] };
+    } finally {
+      clearTimeout(timer);
     }
   },
 );
 
 server.tool(
   "quote",
-  "Get inspirational or random quotes",
+  "Get inspirational or random quotes (remote API, no user data sent)",
   {},
   async () => {
     const result = await apiCall("/quote");
@@ -351,17 +524,23 @@ server.tool(
   },
 );
 
+/**
+ * WiFi QR Code — CRITICAL: runs 100% locally.
+ * WiFi passwords NEVER leave the user's machine.
+ */
 server.tool(
   "wifi_qrcode",
-  "Generate WiFi connection QR codes",
+  "Generate WiFi connection QR codes (runs 100% locally — your password NEVER leaves your device)",
   {
     ssid: z.string().describe("WiFi network name (SSID)"),
     password: z.string().describe("WiFi password"),
     security: z.enum(["WPA", "WEP", "nopass"]).default("WPA").describe("Security type"),
   },
   async ({ ssid, password, security }) => {
-    const result = await apiCall(`/wifi?ssid=${encodeURIComponent(ssid)}&pass=${encodeURIComponent(password)}&sec=${security}`);
-    return { content: [{ type: "text", text: result }] };
+    // WiFi QR code format: WIFI:S:<SSID>;T:<WPA|WEP|>;P:<password>;;
+    const wifiString = `WIFI:S:${ssid};T:${security};P:${password};;`;
+    const dataUrl = await QRCode.toDataURL(wifiString, { width: 400, margin: 2 });
+    return { content: [{ type: "text", text: dataUrl }] };
   },
 );
 
@@ -397,6 +576,7 @@ server.tool(
           backend: API_BASE,
           status: result.startsWith("{") ? "healthy" : "degraded",
           latency_ms: elapsed,
+          version: VERSION,
         }),
       }],
     };
@@ -410,7 +590,9 @@ server.tool(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("MyClaw Toolkit MCP server running (stdio)");
+  console.error(`MyClaw Toolkit v${VERSION} — Privacy-first MCP server running (stdio)`);
+  console.error("  Local tools: timestamp, uuid, base64, hash, qrcode, wifi_qrcode, color_tools, json_formatter, url_tools, text_tools, bmi_calculator, vcard_generator, markdown_to_html");
+  console.error("  Remote tools: web_search, news_search, product_search, exchange_rate, crypto_price, domain_check, rss_feed, read_page, ai_translate, quote, compare");
 }
 
 main().catch(console.error);

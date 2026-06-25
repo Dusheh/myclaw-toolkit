@@ -6,12 +6,12 @@
     "url": "https://github.com/Dusheh/myclaw-toolkit",
     "source": "github"
   },
-  "version": "1.0.8",
+  "version": "1.0.9",
   "packages": [
     {
       "identifier": "myclaw-toolkit",
       "registryType": "npm",
-      "version": "1.0.8",
+      "version": "1.0.9",
       "transport": {
         "type": "stdio"
       }
